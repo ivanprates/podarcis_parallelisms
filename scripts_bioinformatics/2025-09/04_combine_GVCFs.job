@@ -1,0 +1,177 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2024-22-210
+
+## Job name:
+#SBATCH -J 04
+
+## Output name:
+## %x = job name, %j = job ID.
+## chrom_field is replaced by the batch_sub script!
+#SBATCH --output=%x_%j_chrom_field.out
+
+## Partition:
+#SBATCH -p shared
+
+## Requested wall-clock time:
+## Eight hours to be safe.
+#SBATCH -t 08:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+## CPUs per task and memory per CPU:
+#SBATCH --mem-per-cpu=888M
+#SBATCH --cpus-per-task=10
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Actual commands come below this line.
+
+## The goals of this script are:
+## To combine GVCFs across samples for each chromosome.
+## To genotype the GVCFs.
+## To apply variant filters.
+
+## Modules:
+module load gatk/4.5.0.0
+
+## Directory with GVCF files:
+datadir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/03_calling
+
+## Create destination directory:
+mkdir /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/04_combined_VCFs
+
+## Directory to save combined VCFs:
+savedir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/04_combined_VCFs
+
+## Focal chromosome:
+chrom=chrom_field
+
+## Focal taxon:
+sp=sp_field
+
+## Reference genome to use:
+
+## Podarcis cretensis genome:
+#refgenome=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/refgenomes/rPodCre2.1_GCA_951804945.1.fna
+
+## Podarcis gaigeae genome:
+#refgenome=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/refgenomes/rPodGai1.hap1.1.primary.fa
+
+## Podarcis pityusensis genome:
+#refgenome=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/refgenomes/rPodPit1.hap1.1.primary.fa
+
+## Podarcis muralis genome (the "Spanish reference"):
+refgenome=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/refgenomes/PodMur_1.0_GCF_004329235.1.fna
+
+## Status:
+echo "Processing of ${chrom} is starting!"
+date
+
+## Create folders for temporary files:
+mkdir ${savedir}/tmp_dir_comb_${sp}_${chrom}
+mkdir ${savedir}/tmp_dir_geno_${sp}_${chrom}
+
+## Status:
+echo "Now combining GVCs for ${chrom}!"
+date
+
+## Create list of GVCFs for target taxon and chromosome:
+ls ${datadir}/${sp}_*_${chrom}.g.vcf.gz > ${savedir}/GVCFs_${sp}_${chrom}.list
+
+## For each chromosome, combine GVCFs:
+gatk --java-options "-Xmx8g" CombineGVCFs \
+-R ${refgenome} \
+-V ${savedir}/GVCFs_${sp}_${chrom}.list \
+-O ${savedir}/${sp}_${chrom}.g.vcf.gz \
+--tmp-dir ${savedir}/tmp_dir_comb_${sp}_${chrom}
+
+## Status:
+echo "Combining GVCs for ${chrom} completed!"
+echo "Now genotyping GVCs for ${chrom}!"
+date
+
+## For each chromosome, genotype GVCFs:
+gatk --java-options "-Xmx8g" GenotypeGVCFs \
+-R ${refgenome} \
+-V ${savedir}/${sp}_${chrom}.g.vcf.gz \
+-O ${savedir}/${sp}_${chrom}.vcf.gz \
+--tmp-dir ${savedir}/tmp_dir_geno_${sp}_${chrom}
+
+## Status:
+echo "Genotyping GVCs for ${chrom} completed!"
+echo "Now selecting SNP variants!"
+date
+
+## Remove temporary or intermediate files and folders:
+rm ${savedir}/GVCFs_${sp}_${chrom}.list
+rm -rf ${savedir}/tmp_dir_comb_${sp}_${chrom}
+rm -rf ${savedir}/tmp_dir_geno_${sp}_${chrom}
+rm ${savedir}/${sp}_${chrom}.g.vcf.gz*
+
+## Select SNP variants:
+gatk --java-options "-Xmx8g" SelectVariants \
+-V ${savedir}/${sp}_${chrom}.vcf.gz \
+-O ${savedir}/${sp}_${chrom}_SNP.vcf.gz \
+-select-type SNP
+
+## Index VCF:
+gatk IndexFeatureFile -I ${savedir}/${sp}_${chrom}_SNP.vcf.gz
+
+## Status:
+echo "Selecting SNP variants complete!"
+echo "Now selecting indel variants!"
+date
+
+## Select indel variants:
+gatk --java-options "-Xmx8g" SelectVariants \
+-V ${savedir}/${sp}_${chrom}.vcf.gz \
+-O ${savedir}/${sp}_${chrom}_INDEL.vcf.gz \
+-select-type INDEL
+
+## Index VCF:
+gatk IndexFeatureFile -I ${savedir}/${sp}_${chrom}_INDEL.vcf.gz
+
+## Remove intermediate files:
+rm ${savedir}/${sp}_${chrom}.vcf.gz*
+
+## Status:
+echo "Selecting indel variants complete!"
+echo "Now applying filters!"
+date
+
+## Apply several filters:
+gatk --java-options "-Xmx8g" VariantFiltration \
+-R ${refgenome} \
+-V ${savedir}/${sp}_${chrom}_SNP.vcf.gz \
+--mask ${savedir}/${sp}_${chrom}_INDEL.vcf.gz \
+--mask-extension 10 \
+--mask-name InDel \
+--filter-expression "FS > 60.0" --filter-name "FisherStrand" \
+--filter-expression "QD < 2.0" --filter-name "QD2" \
+--filter-expression "QUAL < 30.0" --filter-name "QUAL30" \
+--filter-expression "MQ < 40.0" --filter-name "MapQual40" \
+--filter-expression "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+--filter-expression "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
+--filter-expression "DP < 240"  --filter-name "minDepth" \
+--filter-expression "DP > 960"  --filter-name "maxDepth" \
+-O ${savedir}/${sp}_${chrom}_SNP_filtered.vcf.gz
+
+## Remove intermediate files:
+rm ${savedir}/${sp}_${chrom}_SNP.vcf.gz*
+rm ${savedir}/${sp}_${chrom}_INDEL.vcf.gz*
+
+## Status:
+echo "Processing of ${chrom} from ${sp} complete!"
+date
+
+## End of script.
+

@@ -1,0 +1,81 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2026-4-314
+##naiss2024-5-498
+
+## Job name:
+#SBATCH -J BP01
+
+## Requested wall-clock time:
+#SBATCH -t 10:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+### Partition:
+#SBATCH -p shared
+
+## Number of CPUs per task and memory per cpu:
+#SBATCH --cpus-per-task=32
+#SBATCH --mem-per-cpu=885M
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Output name:
+## %x = job name, %j = job ID, %a = array index
+#SBATCH --output=%j_%x_%a.log
+
+## Job array definition:
+## 6 species × 3 runs = 18 jobs (0-17).
+## 5 species × 3 runs = 15 jobs (0-14).
+## 4 species × 3 runs = 12 jobs (0-11).
+## 2 species x 3 runs = 06 jobs (0-5).
+## 1 species × 3 runs = 03 jobs (0-2).
+#SBATCH --array=0-11
+
+## Actual commands start here.
+
+## Define species and runs:
+species=(Pcr Pga Ppi Pva)
+#species=(Pfi Pli)
+runs=(1 2 3)
+
+## Compute indices based on array ID:
+sp_i=$(( SLURM_ARRAY_TASK_ID / ${#runs[@]} ))
+run_i=$(( SLURM_ARRAY_TASK_ID % ${#runs[@]} ))
+
+## Focal species and run:
+sp=${species[$sp_i]}
+run=${runs[$run_i]}
+
+## Status:
+echo "Running species $sp run ${run}!"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+date
+
+## BayPass Program location:
+baypass=/cfs/klemming/projects/snic/naiss2024-23-107/programs/baypass_v3/sources/g_baypass
+
+## Change directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/baypass_0326
+
+## Status:
+echo "BayPass run $run for ${sp} starting!"
+date
+
+## Run baypass:
+${baypass} -gldatafile ${sp}.gl -outprefix ${sp}_r${run} -seed ${run} -nthreads ${SLURM_CPUS_PER_TASK}
+
+## Status:
+echo "BayPass run ${run} for ${sp} completed!"
+date
+
+## End of script.
+

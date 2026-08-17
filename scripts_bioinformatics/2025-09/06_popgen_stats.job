@@ -1,0 +1,84 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2025-22-304
+
+## Job name:
+#SBATCH -J stats
+
+## Output name:
+## %x = job name, %j = job ID.
+#SBATCH --output=%x_%j.out
+
+## Partition:
+#SBATCH -p shared
+
+## Requested wall-clock time:
+## Ten minutes seem sufficient for one species at a time.
+#SBATCH -t 06:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+## Number of CPUs per task:
+#SBATCH --cpus-per-task=1
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Actual commands come below this line.
+
+## Modules:
+module load vcftools/0.1.16
+
+## Directory with SNP data:
+datadir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/05_final_VCFs
+
+## Create destination directory:
+mkdir /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/popgen_stats
+
+## Change directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/popgen_stats
+
+## List samples of each population:
+tr '\t' '\n' < ${datadir}/Pcr.samples.txt | grep EIS > Pcr_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pcr.samples.txt | grep THE > Pcr_G.samples.txt
+tr '\t' '\n' < ${datadir}/Ppi.samples.txt | grep PUJ > Ppi_G.samples.txt
+tr '\t' '\n' < ${datadir}/Ppi.samples.txt | grep TRU > Ppi_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pga.samples.txt | grep AT > Pga_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pga.samples.txt | grep LIN > Pga_G.samples.txt
+tr '\t' '\n' < ${datadir}/Pfi.samples.txt | grep CI > Pfi_G.samples.txt
+tr '\t' '\n' < ${datadir}/Pfi.samples.txt | grep CO > Pfi_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pva.samples.txt | grep OU > Pva_G.samples.txt
+tr '\t' '\n' < ${datadir}/Pva.samples.txt | grep TZ > Pva_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pli.samples.txt | grep GOD > Pli_B.samples.txt
+tr '\t' '\n' < ${datadir}/Pli.samples.txt | grep MUR > Pli_G.samples.txt
+
+## Loop over species:
+for sp in Pcr Pga Ppi Pva ; do
+
+## Status:
+echo Now processing ${sp} !
+
+## Estimate FST for each species, using windows:
+#vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --weir-fst-pop ${sp}_G.samples.txt --weir-fst-pop ${sp}_B.samples.txt --fst-window-size 5000 --fst-window-step 2500 --out ${sp}_w5_s2.5
+
+## Estimate FST for each species, using all SNPs:
+#vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --weir-fst-pop ${sp}_G.samples.txt --weir-fst-pop ${sp}_B.samples.txt --out ${sp}_all_SNPs
+
+## Estimate Tajima's D for each population of each species:
+#vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --keep ${sp}_G.samples.txt --TajimaD 2500 --out ${sp}_G_w2.5
+#vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --keep ${sp}_B.samples.txt --TajimaD 2500 --out ${sp}_B_w2.5
+vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --keep ${sp}_G.samples.txt --TajimaD 5000 --out ${sp}_G_w5
+vcftools --vcf ${datadir}/${sp}_SNP_final.vcf --keep ${sp}_B.samples.txt --TajimaD 5000 --out ${sp}_B_w5
+
+## Close loop:
+done
+
+## End of script.
+

@@ -1,0 +1,75 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2024-22-210
+
+## Job name:
+#SBATCH -J index
+
+## Output name:
+## %x = job name, %j = job ID.
+#SBATCH --output=%x_%j.out
+
+## Partition:
+#SBATCH -p shared
+
+## Requested wall-clock time:
+## Two hours seem sufficient for this.
+#SBATCH -t 02:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of MPI processes per node:
+#SBATCH --ntasks-per-node=16
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Actual commands come below this line.
+
+## Modules:
+module load bwa/0.7.17
+#module load picard/2.25.5
+module load samtools/1.20
+
+## If needed, specify Picard's location (module loading has stalled for Picard):
+PICARD_HOME=/pdc/software/eb/software/picard/2.25.5
+
+## Directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/refgenomes/
+
+## Reference genome to use:
+#refgenome=rPodGai1.hap1.1.primary
+#refgenom=rPodPit1.hap1.1.primary
+#refgenome=rPodCre2.1_GCA_951804945.1
+#refgenome=ERR11413981
+#refgenome=PodMur_1.0_GCF_004329235.1
+refgenome=rPodLil1.2_GCA_947686815.1
+
+## unzip:
+#echo "Now unzipping ${refgenome}!"
+#gzip -dk ${refgenome}.fa.gz
+#gzip -dk ${refgenome}.fna.gz
+#gzip -dk ${refgenome}.fastq.gz
+
+## Index:
+echo "Now indexing ${refgenome}!"
+#bwa index ${refgenome}.fa
+bwa index ${refgenome}.fna
+#bwa index ${refgenome}.fastq
+
+## Create sequence dictionary:
+#java -jar $PICARD_HOME/picard.jar CreateSequenceDictionary --R ${refgenome}.fa
+java -jar $PICARD_HOME/picard.jar CreateSequenceDictionary --R ${refgenome}.fna
+#java -jar $PICARD_HOME/picard.jar CreateSequenceDictionary --R ${refgenome}.fastq
+
+## Create .fai file:
+#samtools faidx ${refgenome}.fa
+samtools faidx ${refgenome}.fna
+#samtools faidx ${refgenome}.fastq
+
+## End of script.
+

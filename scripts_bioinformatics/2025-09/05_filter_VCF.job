@@ -1,0 +1,182 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2025-22-304
+
+## Job name:
+#SBATCH -J 05
+
+## Output name:
+## %x = job name, %j = job ID.
+#SBATCH --output=%x_%j.out
+
+## Partition:
+#SBATCH -p shared
+
+## Requested wall-clock time:
+#SBATCH -t 04:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+## CPUs per task and memory per CPU:
+#SBATCH --mem-per-cpu=888M
+#SBATCH --cpus-per-task=10
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Actual commands come below this line.
+
+## Modules:
+#module load picard/2.25.5
+module load bcftools/1.20
+
+## If needed, specify Picard's location (module loading has stalled for Picard):
+PICARD_HOME=/pdc/software/eb/software/picard/2.25.5
+
+## Directory with chromosome-level VCF files, combined across samples:
+datadir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/04_combined_VCFs
+
+## Directory to save filtered VCFs, with chromosomes combined:
+savedir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/05_final_VCFs
+mkdir -p ${savedir}
+
+## Focal taxon:
+#sp=Pcr
+#sp=Pga
+#sp=Pfi
+#sp=Ppi
+sp=Pli
+#sp=Pva
+
+## Status:
+echo "Processing of ${sp} is starting!"
+date
+
+## Combine all chromosome VCF files into one:
+java -jar $PICARD_HOME/picard.jar GatherVcfs \
+-O ${savedir}/${sp}_SNP_all.vcf.gz \
+-I ${datadir}/${sp}_NC_041312.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041313.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041314.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041315.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041316.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041317.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041318.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041319.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041320.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041321.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041322.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041323.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041324.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041325.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041326.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041327.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041328.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041329.1_SNP_filtered.vcf.gz \
+-I ${datadir}/${sp}_NC_041330.1_SNP_filtered.vcf.gz
+
+## Sanitize headers:
+echo "Now sanitizing VCF file headers!"
+date
+bcftools view ${savedir}/${sp}_SNP_all.vcf.gz -Oz -o ${savedir}/${sp}_SNP_all_sanitized.vcf.gz
+mv ${savedir}/${sp}_SNP_all_sanitized.vcf.gz ${savedir}/${sp}_SNP_all.vcf.gz
+bcftools index ${savedir}/${sp}_SNP_all.vcf.gz
+
+## Keep only positions that passed previous filters:
+echo "Now filtering by previous filters!"
+date
+bcftools view -f 'PASS,.' -Ob \
+${savedir}/${sp}_SNP_all.vcf.gz \
+-o ${savedir}/${sp}_SNP_pass.bcf
+bcftools index ${savedir}/${sp}_SNP_pass.bcf
+
+## Restrict to bi-allelic SNPs:
+echo "Now filtering for bi-allelic SNPs!"
+date
+bcftools view -m2 -M2 -v snps -Ob \
+${savedir}/${sp}_SNP_pass.bcf \
+-o ${savedir}/${sp}_SNP_pass_biallelic.bcf
+bcftools index ${savedir}/${sp}_SNP_pass_biallelic.bcf
+
+## Genotype quality filter:
+echo "Now filtering by genotype quality!"
+date
+bcftools filter -S . -e 'FMT/GQ<20' -Ob \
+${savedir}/${sp}_SNP_pass_biallelic.bcf \
+-o ${savedir}/${sp}_SNP_pass_biallelic_GQ20.bcf
+bcftools index ${savedir}/${sp}_SNP_pass_biallelic_GQ20.bcf
+
+## Mask genotypes with low or high depth (DP):
+## Step not in NF's original filtering pipeline.
+echo "Now filtering by depth!"
+date
+bcftools filter -S . -e 'FMT/DP<5 || FMT/DP>50' -Ob \
+${savedir}/${sp}_SNP_pass_biallelic_GQ20.bcf \
+-o ${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550.bcf
+bcftools index ${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550.bcf
+
+## Missingness filter:
+echo "Now filtering by missing data!"
+date
+bcftools filter -e 'F_MISSING > 0.5' -Ob \
+${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550.bcf \
+-o ${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550_miss50.bcf
+bcftools index ${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550_miss50.bcf
+
+## MAF filter:
+echo "Now filtering by MAF!"
+date
+bcftools view -q 0.03:minor -Ob \
+${savedir}/${sp}_SNP_pass_biallelic_GQ20_DP550_miss50.bcf \
+-o ${savedir}/${sp}_SNP_final_MAF03.bcf
+bcftools index ${savedir}/${sp}_SNP_final_MAF03.bcf
+
+## SNP pruning after all filters:
+echo "Now pruning SNPs (10 bp)!"
+date
+bcftools +prune -w 10bp -n 1 -N rand -Ob \
+${savedir}/${sp}_SNP_final_MAF03.bcf \
+-o ${savedir}/${sp}_SNP_final_MAF03_pruned10bp.bcf
+bcftools index ${savedir}/${sp}_SNP_final_MAF03_pruned10bp.bcf
+
+## Stats:
+bcftools stats ${savedir}/${sp}_SNP_final_MAF03_pruned10bp.bcf > ${savedir}/${sp}_SNP_final.stats
+
+## Convert to VCF:
+bcftools view -Ov \
+${savedir}/${sp}_SNP_final_MAF03_pruned10bp.bcf \
+-o ${savedir}/${sp}_SNP_final.vcf
+
+## Thin to 1 SNP every 10 kb:
+echo "Now thinning SNPs (10 kb)!"
+date
+vcftools --vcf ${savedir}/${sp}_SNP_final.vcf \
+--recode --thin 10000 --out ${savedir}/${sp}_SNP_final_thin10k
+mv ${savedir}/${sp}_SNP_final_thin10k.recode.vcf ${savedir}/${sp}_SNP_final_thin10k.vcf
+
+## Generating 012 format from VCF:
+vcftools --vcf ${sp}_SNP_final_thin10k.vcf --out ${sp}_SNP_final_thin10k --012
+cat ${sp}_SNP_final_thin10k.012 | sed -e 's/-1/9/g' ${sp}_SNP_final_thin10k.012 > ${sp}_SNP_final_thin10k_tmp.012
+mv ${sp}_SNP_final_thin10k_tmp.012 ${sp}_SNP_final_thin10k.012
+
+## PCA:
+conda activate plink
+plink --bcf ${savedir}/${sp}_SNP_final_MAF03_pruned10bp.bcf --pca --out ${savedir}/${sp}_PCA --aec -const-fid
+
+## Clean up intermediate files:
+rm ${savedir}/${sp}_SNP_*.bcf*
+rm ${savedir}/${sp}_SNP_all.vcf.gz
+
+## Status:
+echo "Filtering steps for ${sp} complete!"
+date
+
+## End of script.
+

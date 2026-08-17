@@ -1,0 +1,16 @@
+target_id,pigmentation,population,individual,lineage,sex
+CA100_black,Black,Tuscany,CA100,Italian,F
+CA100_green,Green,Tuscany,CA100,Italian,F
+DS31_brown,Brown,Rome,DS31,Italian,F
+DS32_brown,Brown,Rome,DS32,Italian,M
+LO100_brown,Brown,SA,LO100,SA,M
+LO101_brown,Brown,SA,LO101,SA,F
+LO102_brown,Brown,SA,LO102,SA,F
+RA100_black,Black,SA,RA100,SA,F
+RA100_green,Green,SA,RA100,SA,F
+RA101_black,Black,SA,RA101,SA,F
+RA101_green,Green,SA,RA101,SA,F
+RA102_black,Black,SA,RA102,SA,M
+RA102_green,Green,SA,RA102,SA,M
+SMA100_black,Black,Rome,SMA100,Italian,M
+SMA100_green,Green,Rome,SMA100,Italian,M

@@ -1,0 +1,116 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2026-4-314
+## naiss2024-5-498
+
+## Job name:
+#SBATCH -J BP03
+
+## Requested wall-clock time:
+#SBATCH -t 00:10:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+### Partition:
+#SBATCH -p shared
+
+## Number of CPUs per task and memory per cpu:
+## The maximum memory per cpu is 888M.
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=885M
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Output name:
+## %x = job name, %j = job ID, %a = array index
+#SBATCH --output=%j_%x_%a.log
+
+## Job array definition:
+## 6 species × 3 runs = 18 jobs (0-17).
+## 5 species × 3 runs = 15 jobs (0-14).
+## 4 species × 3 runs = 12 jobs (0-11).
+## 3 species × 3 runs = 09 jobs (0-8).
+## 2 species × 3 runs = 06 jobs (0-5).
+## 1 species × 3 runs = 03 jobs (0-2)
+#SBATCH --array=0-17
+
+## Actual commands start here.
+
+## Define species and run combinations:
+species=(Pcr Pfi Pga Pli Ppi Pva)
+runs=(1 2 3)
+
+## Compute indices based on array ID:
+sp_i=$(( SLURM_ARRAY_TASK_ID / ${#runs[@]} ))
+run_i=$(( SLURM_ARRAY_TASK_ID % ${#runs[@]} ))
+
+## Focal species and run:
+sp=${species[$sp_i]}
+r=${runs[$run_i]}
+
+## Status:
+echo "Running species $sp run $r!"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+date
+
+## Modules:
+module load PDC
+module load R
+
+## Change directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/baypass_0326
+
+## Cutoff for quantile threshold:
+for cutoff in 0.9900 0.9925 0.9950 0.9975 0.9990
+do
+
+## 1. Use R to obtain XtX outlier threshold: 
+
+## Status:
+echo "Estimating XtX threshold from the simulated dataset!"
+date
+
+## Create a temporary R script:
+tmp_script=$(mktemp --suffix=.R)
+
+## Write the R script into the temporary file:
+cat <<EOF > "$tmp_script"
+
+## Enforce no use of scientific number notation given large numbers of SNPs or chromosome windows:
+options(scipen = 999)
+
+## Read the XtX statistics table:
+pod_xtx <- read.table("${sp}_r${r}.pods_summary_pi_xtx.out", header = TRUE)
+
+## Compute the threshold:
+pod_thresh <- quantile(pod_xtx\$M_XtX, probs = $cutoff)
+
+## Save the threshold into a text file:
+write(pod_thresh, file = "${sp}_r${r}_xtx_threshold_${cutoff}.txt")
+
+## End of R script.
+EOF
+
+## Run the R script:
+Rscript "$tmp_script"
+
+## Remove intermediate files:
+rm -f "$tmp_script"
+
+## Close loop:
+done
+
+## Status:
+echo "All steps for ${sp} complete!"
+date
+
+
+## End of script.

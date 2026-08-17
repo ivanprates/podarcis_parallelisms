@@ -1,0 +1,193 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2026-4-314
+
+## Job name:
+#SBATCH -J BP04
+
+## Requested wall-clock time:
+#SBATCH -t 02:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+### Partition:
+#SBATCH -p shared
+
+## Number of CPUs per task and memory per cpu:
+## The maximum memory per cpu is 888M.
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=885M
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Output name:
+## %x = job name, %j = job ID, %a = array index.
+#SBATCH --output=%j_%x_%a.log
+
+## Job array definition: 
+## 6 species = 6 jobs (0–5).
+#SBATCH --array=0-5
+
+## Actual commands come below this line.
+
+## Define species:
+species=(Pcr Pfi Pga Pli Ppi Pva)
+#species=(Pcr)
+
+## Pick species based on array ID:
+sp=${species[$SLURM_ARRAY_TASK_ID]}
+
+## Status:
+echo "Running species $sp!"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+date
+
+## Load modules:
+module load PDC
+module load R
+
+## Set working directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/baypass_0326
+
+## 1. Combine runs, compute median XtX ----
+
+## Create a temporary R script:
+tmp_script=$(mktemp --suffix=.R)
+
+## Write the R script into the temporary file:
+cat <<EOF > "$tmp_script"
+
+## Enforce no use of scientific number notation given large numbers of SNPs or chromosome windows:
+options(scipen = 999)
+
+## Packages:
+library(tidyverse)
+
+## Status:
+print("Now processing ${sp}!")
+
+## XtX estimates:
+r1 <- read.table(file = "${sp}_r1_summary_pi_xtx.out", header = TRUE)
+names(r1) <- c("MRK", "M_P", "SD_P", "M_XtX", "SD_XtX", "XtXst", "pval")
+
+r2 <- read.table(file = "${sp}_r2_summary_pi_xtx.out", header = TRUE)
+names(r2) <- c("MRK", "M_P", "SD_P", "M_XtX", "SD_XtX", "XtXst", "pval")
+
+r3 <- read.table(file = "${sp}_r3_summary_pi_xtx.out", header = TRUE)
+names(r3) <- c("MRK", "M_P", "SD_P", "M_XtX", "SD_XtX", "XtXst", "pval")
+
+## Merge:
+merged <- data.frame(MRK = r1\$MRK,
+                     XtX_r1 = r1\$M_XtX,
+                     XtX_r2 = r2\$M_XtX,
+                     XtX_r3 = r3\$M_XtX,
+                     pval_r1 = r1\$pval,
+                     pval_r2 = r2\$pval,
+                     pval_r3 = r3\$pval)
+
+## Compute medians per SNP:
+merged\$XtX <- apply(merged[, c("XtX_r1","XtX_r2","XtX_r3")], 1, median)
+merged\$pval <- apply(merged[, c("pval_r1","pval_r2","pval_r3")], 1, median)
+
+## Save:
+write.table(merged, file = "${sp}_median_summary_pi_xtx.out", row.names = FALSE, quote = FALSE)
+
+## End of R script.
+EOF
+
+## Run the R script:
+Rscript "$tmp_script"
+
+## Remove temporary file:
+rm -f "$tmp_script"
+
+## 2. Estimate threshold and extract outliers per cutoff ----
+
+## Cutoff for quantile threshold:
+for cutoff in 0.9900 0.9925 0.9950 0.9975 0.9990
+do
+
+## Status:
+echo "Extracting outliers at cutoff ${cutoff} for ${sp}!"
+date
+
+## Create a temporary R script:
+tmp_script=$(mktemp --suffix=.R)
+
+## Write the R script into the temporary file:
+cat <<EOF > "$tmp_script"
+
+## Enforce no use of scientific number notation given large numbers of SNPs or chromosome windows:
+options(scipen = 999)
+
+## Packages:
+library(tidyverse)
+
+## Load median XtX statistics computed above:
+merged <- read.table(file = "${sp}_median_summary_pi_xtx.out", header = TRUE)
+
+## SNP positional information:
+SNP_ids <- read.table(file = "${sp}_snp_ids.txt", header = FALSE)
+names(SNP_ids) <- c("CHROM", "SNP", "MRK")
+
+## Merge:
+scan <- merge(SNP_ids, merged, by = "MRK")
+
+## Order of chromosomes:
+scan\$CHROM <- factor(x = scan\$CHROM, levels = sort(unique(scan\$CHROM)))
+
+## Import thresholds for XtX statistics:
+t1 <- as.numeric(read.table(file = "${sp}_r1_xtx_threshold_${cutoff}.txt", header = FALSE))
+t2 <- as.numeric(read.table(file = "${sp}_r2_xtx_threshold_${cutoff}.txt", header = FALSE))
+t3 <- as.numeric(read.table(file = "${sp}_r3_xtx_threshold_${cutoff}.txt", header = FALSE))
+
+## Mean threshold:
+threshold <- mean(c(t1, t2, t3))
+
+## Save mean threshold:
+write(threshold, file = "${sp}_mean_xtx_threshold_${cutoff}.txt")
+
+## Outlier SNPs:
+outs <- scan[scan\$XtX >= threshold, ]
+
+## BED format:
+bed <- outs %>% select(CHROM, SNP) %>%
+  mutate(START = as.integer(SNP - 1), END = as.integer(SNP)) %>%
+  select(CHROM, START, END)
+
+## Define factor for ordered chromosomes, change chromosome labels:
+bed\$CHROM <- factor(x = bed\$CHROM,
+                     levels = sort(unique(bed\$CHROM)),
+                     labels = c(1:18, "Z"))
+
+## Write BED file:
+write.table(bed,
+            file = "${sp}_median_outlier_SNPs_${cutoff}.bed",
+            sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+## End of R script.       
+EOF
+
+## Run the R script:
+Rscript "$tmp_script"
+
+## Remove intermediate and temporary files:
+rm -f "$tmp_script"
+
+## Close loop:
+done
+
+## Status:
+echo "All done for ${sp}!"
+date
+
+## End of script.
+

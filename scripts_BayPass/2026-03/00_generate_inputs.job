@@ -1,0 +1,222 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2026-4-314
+##naiss2024-5-498
+
+## Job name:
+#SBATCH -J BP00
+
+## Requested wall-clock time:
+#SBATCH -t 01:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+## Partition:
+#SBATCH -p shared
+
+## Number of CPUs per task and memory per cpu:
+## The maximum memory per cpu is 888M.
+#SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=885M
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Output name:
+## %x = job name, %j = job ID, %a = array index.
+#SBATCH --output=%j_%x_%a.log
+
+## Job array definition:
+## 6 species = 6 jobs (0-5).
+#SBATCH --array=0-5
+
+## Define species:
+species=(Pcr Pfi Pga Pli Ppi Pva)
+
+## Pick species based on array ID:
+sp=${species[$SLURM_ARRAY_TASK_ID]}
+
+## Status:
+echo "Running species $sp!"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+date
+
+## Actual commands come below this line.
+
+## Modules:
+module load bcftools
+module load plink
+module load vcftools
+
+## Location of VCF files:
+VCFdir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/05_final_VCFs
+
+## Change directory:
+cd /cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/baypass_0326
+
+## 1. Subsample SNPs and prepare BayPass input file:
+
+## Status:
+echo "Now preparing BayPass input file for ${sp}!"
+date
+
+## List all SNPs in the original VCF:
+bcftools query -f '%CHROM\t%POS\n' ${VCFdir}/${sp}_SNP_final.vcf > ${sp}_all_sites.txt
+
+## Create lists of SNPs per chromosome:
+awk '{print > "'"${sp}"'_chr_" $1 "_sites.txt"}' ${sp}_all_sites.txt
+
+## Let's now sample SNPs from each chromosome proportionally to their size.
+## Count the total number of SNPs:
+total_snps=$(wc -l < ${sp}_all_sites.txt)
+
+## Initialize an empty file to append outputs of the loop below:
+> ${sp}_subset_raw.txt
+
+## If total SNPs are already below the target, keep all; otherwise subsample:
+if [ "$total_snps" -le 5000000 ]; then
+  echo "Total SNPs (${total_snps}) below target of 5,000,000 for ${sp}. Keeping all SNPs."
+  cp ${sp}_all_sites.txt ${sp}_subset_raw.txt
+else
+  
+  ## Loop over chromosome files:
+  for f in ${sp}_chr_*_sites.txt; do
+    count=$(wc -l < "$f")
+    sample_size=$(( count * 5000000 / total_snps ))
+
+    ## Guard against rounding to zero for very small chromosomes:
+    if [ "$sample_size" -lt 1 ]; then sample_size=1; fi
+
+    ## Cap sample size at chromosome size in case of rounding overflow:
+    if [ "$sample_size" -gt "$count" ]; then sample_size=$count; fi
+
+    ## Randomly sample SNPs using Fisher-Yates shuffle via awk with a fixed seed:
+    awk -v n="$sample_size" -v seed=1986 '
+      BEGIN { srand(seed) }
+      {
+        lines[NR] = $0
+      }
+      END {
+        for (i = 1; i <= n; i++) {
+          j = i + int(rand() * (NR - i + 1))
+          tmp = lines[i]; lines[i] = lines[j]; lines[j] = tmp
+        }
+        for (i = 1; i <= n; i++) print lines[i]
+      }
+    ' "$f" >> ${sp}_subset_raw.txt
+
+  done ## Close loop.
+
+fi ## Close if statement.
+
+## Sort retained SNPs by chromosome and position:
+sort -k1,1 -k2,2n ${sp}_subset_raw.txt > ${sp}_kept_sites.txt
+
+## Finally, extract a new VCF based on the retained SNPs:
+bcftools view -T ${sp}_kept_sites.txt ${VCFdir}/${sp}_SNP_final.vcf -Ov -o ${sp}.vcf
+
+## Create a line-numbered SNP ID list to extract outlier SNP positions later:
+grep -v "^#" ${sp}.vcf | awk 'BEGIN{OFS="\t"} {print $1, $2, NR}' > ${sp}_snp_ids.txt
+
+## Let's now create the input file for BayPass. First, extract SNPs.
+bcftools query -f '[%PL ]\n' ${sp}.vcf > ${sp}.gl.tmp
+
+## Add header assigning (30) individuals to (2) populations (15 each):
+(echo "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2"; cat ${sp}.gl.tmp) > ${sp}.gl
+
+## How many SNPs per chromosome in the original file?
+echo "Number of SNPs per chromosome in the original VCF for ${sp}:"
+awk '{count[$1]++} END {for (chr in count) print chr, count[chr]}' ${sp}_all_sites.txt | sort -k1,1
+
+## How many SNPs per chromosome were retained?
+echo "Number of SNPs per chromosome after thinning for ${sp}:"
+awk '{count[$1]++} END {for (chr in count) print chr, count[chr]}' ${sp}_snp_ids.txt | sort -k1,1
+
+## 2. Generating allele count file:
+## This file is used in BayPass simulations to estimate the XtX threshold.
+
+## Status:
+echo "Now generating allele count file for ${sp}!"
+date
+
+## Let's first replace chromosome names with numbers, as plink likes.
+## NC_041330.1 is the Z chromosome and is mapped to "Z" for consistency
+## with downstream outlier BED file labelling (which uses c(1:18, "Z")).
+sed -e 's/NC_041312.1/1/' \
+    -e 's/NC_041313.1/2/' \
+    -e 's/NC_041314.1/3/' \
+    -e 's/NC_041315.1/4/' \
+    -e 's/NC_041316.1/5/' \
+    -e 's/NC_041317.1/6/' \
+    -e 's/NC_041318.1/7/' \
+    -e 's/NC_041319.1/8/' \
+    -e 's/NC_041320.1/9/' \
+    -e 's/NC_041321.1/10/' \
+    -e 's/NC_041322.1/11/' \
+    -e 's/NC_041323.1/12/' \
+    -e 's/NC_041324.1/13/' \
+    -e 's/NC_041325.1/14/' \
+    -e 's/NC_041326.1/15/' \
+    -e 's/NC_041327.1/16/' \
+    -e 's/NC_041328.1/17/' \
+    -e 's/NC_041329.1/18/' \
+    -e 's/NC_041330.1/19/' \
+    ${sp}.vcf > ${sp}_nchr.vcf
+
+## Convert VCF to PLINK.
+## --allow-extra-chr is included to handle the Z chromosome label,
+## which plink would otherwise reject as a non-standard chromosome name.
+vcftools --vcf ${sp}_nchr.vcf --plink --out ${sp}.plink
+
+## Convert PLINK to BED, allowing extra (non-numeric) chromosome names:
+plink --file ${sp}.plink --make-bed --allow-extra-chr --out ${sp}
+
+## Extract genotype columns (skipping the first 6 PED header fields) to add pop info later:
+cut -f 3- ${sp}.plink.ped > ${sp}.temp
+
+## Create pop file:
+awk '{print $2, $1}' ${VCFdir}/${sp}.pops.txt > ${sp}_pops_plink.txt
+
+## Validate that the number of individuals in the pop file matches the PED file
+## before pasting, to avoid silently producing a malformed file:
+ped_samples=$(wc -l < ${sp}.plink.ped)
+pop_samples=$(wc -l < ${sp}_pops_plink.txt)
+if [ "$ped_samples" -ne "$pop_samples" ]; then
+  echo "ERROR: Sample count mismatch between PED (${ped_samples}) and pop file (${pop_samples}) for ${sp}. Aborting."
+  exit 1
+fi
+
+## Paste to add pop info:
+paste ${sp}_pops_plink.txt ${sp}.temp > ${sp}.plink.ped
+
+## Run the population-based allele frequency calculations,
+## allowing extra chromosome names (e.g. Z):
+plink --file ${sp}.plink --allow-extra-chr --freq counts --family --out ${sp}
+
+## At last, generate allele count format. This is also BayPass' input if using the -countdatafile option:
+tail -n +2 ${sp}.frq.strat | awk '{print $7, $8 - $7}' | paste - - > ${sp}_allele_counts.txt
+
+## Remove intermediate files:
+#rm ${sp}_chr_*.txt
+#rm ${sp}_subset_raw.txt
+#rm ${sp}_kept_sites.txt
+rm ${sp}.gl.tmp
+rm ${sp}_nchr.vcf
+rm ${sp}.plink*
+rm ${sp}.bed
+rm ${sp}.bim
+rm ${sp}.fam
+rm ${sp}.nosex
+rm ${sp}.temp
+rm ${sp}_pops_plink.txt
+rm ${sp}.frq.strat
+rm ${sp}.log
+
+## End of script.

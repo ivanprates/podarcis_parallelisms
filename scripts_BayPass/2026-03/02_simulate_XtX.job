@@ -1,0 +1,151 @@
+#!/bin/bash -l
+## The -l above is required to get the full environment with modules.
+
+## Allocation to be charged:
+#SBATCH -A naiss2026-4-314
+## naiss2024-5-498
+
+## Job name:
+#SBATCH -J BP02
+
+## Requested wall-clock time:
+#SBATCH -t 02:00:00
+
+## Number of nodes:
+#SBATCH --nodes=1
+
+## Number of tasks:
+#SBATCH --ntasks=1
+
+### Partition:
+#SBATCH -p shared
+
+## Number of CPUs per task and memory per cpu:
+#SBATCH --cpus-per-task=32
+#SBATCH --mem-per-cpu=885M
+
+## Email me in case time runs out before end of job:
+#SBATCH --mail-type=TIME_LIMIT
+#SBATCH --mail-user=ivanprates@gmail.com
+
+## Output name:
+## %x = job name, %j = job ID, %a = array index
+#SBATCH --output=%j_%x_%a.log
+
+## Job array definition:
+## 6 species × 3 runs = 18 jobs (0-17).
+## 5 species × 3 runs = 15 jobs (0-14).
+## 4 species × 3 runs = 12 jobs (0-11).
+## 3 species × 3 runs = 09 jobs (0-8).
+## 2 species × 3 runs = 06 jobs (0-5).
+## 1 species × 3 runs = 03 jobs (0-2)
+#SBATCH --array=0-5
+
+## Actual commands start here.
+
+## Define species and run combinations:
+#species=(Pcr Pfi Pga Pli Ppi Pva)
+#species=(Pfi Pga Ppi)
+species=(Pfi Pli)
+runs=(1 2 3)
+
+## Compute indices based on array ID:
+sp_i=$(( SLURM_ARRAY_TASK_ID / ${#runs[@]} ))
+run_i=$(( SLURM_ARRAY_TASK_ID % ${#runs[@]} ))
+
+## Focal species and run:
+sp=${species[$sp_i]}
+r=${runs[$run_i]}
+
+## Status:
+echo "Running species ${sp} run ${r}!"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+date
+
+## Modules:
+module load PDC
+module load R
+
+## BayPass program location:
+baypass=/cfs/klemming/projects/snic/naiss2024-23-107/programs/baypass_v3/sources/g_baypass
+
+## Change directory:
+dir=/cfs/klemming/projects/snic/naiss2024-23-107/Podarcis/baypass_0326
+cd ${dir}
+
+## 1. Simulate data under empirical parameter estimates:
+
+## Number of SNPs to use in simulations:
+#Nsnps=$(cat ${sp}_snp_ids.txt | wc -l) ## Same as the empirical number of SNPs.
+Nsnps=1000000 ## For faster simulations, use a fraction of the empirical number.
+
+## Print that:
+echo "Number of SNPs for ${sp} is ${Nsnps}!"
+
+## Status:
+echo "Starting data simulations for ${sp} in R!"
+date
+
+## Create a temporary R script:
+tmp_script=$(mktemp --suffix=.R)
+
+## Write the R script into the temporary file:
+cat <<EOF > "$tmp_script"
+
+################################################
+## R Script by Ivan Prates (www.ivanprates.org).
+## Lund, Sweden, March 2025.
+## This script's goals are:
+## To simulate allele count data under empirical parameter estimates from a BayPass analysis.
+
+## Enforce no use of scientific number notation given large numbers of SNPs or chromosome windows:
+options(scipen = 999)
+
+## Getting ready:
+library("ape")
+setwd("${dir}")
+source("/cfs/klemming/projects/snic/naiss2024-23-107/programs/baypass_v3/utils/baypass_utils.R")
+
+## Steps:
+
+## Read estimated allele frequency covariance matrix:
+omega <- as.matrix(read.table("${sp}_r${r}_mat_omega.out"))
+
+## Read estimated pi (weighted mean reference allele frequency, taken as the ancestral population allele frequency):
+pi.beta.coef <- read.table("${sp}_r${r}_summary_beta_params.out", header = TRUE)
+
+## Read the original allele count data:
+allele.counts <- geno2YN("${sp}_allele_counts.txt")
+
+## Finally, simulate data under these empirical parameter estimates:
+simulated <- simulate.baypass(omega.mat = omega, nsnp = $Nsnps, sample.size = allele.counts\$NN, beta.pi = pi.beta.coef\$Mean, pi.maf = 0, suffix = "${sp}_r${r}.pods")
+
+## End of R script.
+EOF
+
+## Run the R script:
+Rscript "$tmp_script"
+
+## Cleanup the temporary R script:
+rm -f "$tmp_script"
+
+## 2. Run BayPass on simulated data:
+
+## Status:
+echo "Running BayPass inference on the simulated dataset!"
+date
+
+## Ensure that file exists:
+if [ ! -f "G.${sp}_r${r}.pods" ]; then
+  echo "ERROR: Simulated data file G.${sp}_r${r}.pods not found. Aborting."
+  exit 1
+fi ## Close if statement.
+
+## Run BayPass:
+${baypass} -countdatafile G.${sp}_r${r}.pods -outprefix ${sp}_r${r}.pods -seed ${r} -nthreads ${SLURM_CPUS_PER_TASK}
+
+## Status:
+echo "All steps for ${sp} complete!"
+date
+
+## End of script.
