@@ -1,2 +1,1 @@
-Scripts associated with a manuscript on Podarcis lizards.
-Stay tuned!
+Scripts associated with a manuscript on Podarcis lizards, to be submitted soon.
