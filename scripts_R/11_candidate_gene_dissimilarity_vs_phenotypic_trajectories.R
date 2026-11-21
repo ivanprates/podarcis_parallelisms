@@ -268,6 +268,9 @@ s <- shared %>% pivot_wider(
 ## Combine all metrics:
 m <- merge(s, tp, by = c("species_1", "species_2"))
 
+## Keep only unique pairwise comparisons (excluding self-comparisons and duplicate symmetric pairs):
+m <- m %>% filter(as.character(species_1) < as.character(species_2))
+
 ## Function:
 plot.bi <- function(xvar, yvar) {
 
@@ -327,8 +330,8 @@ f5 <- wrap_plots(abc, def, nrow = 2) +
 ## Check:
 f5
 
-## Save:
-ggsave(plot = f5, filename = paste0(path, "figures/FigS3_2026-08.jpg"), width = 36, height = 22, units = "cm")
-ggsave(plot = f5, filename = paste0(path, "figures/FigS3_2026-08.pdf"), width = 36, height = 22, units = "cm", device = cairo_pdf)
+## Save (renumbered to Fig. S4 following insertion of dorsal coloration Fig. S2):
+# ggsave(plot = f5, filename = paste0(path, "figures/FigS4_2026-08.jpg"), width = 36, height = 22, units = "cm")
+# ggsave(plot = f5, filename = paste0(path, "figures/FigS4_2026-08.pdf"), width = 36, height = 22, units = "cm", device = cairo_pdf)
 
 ## End of script.

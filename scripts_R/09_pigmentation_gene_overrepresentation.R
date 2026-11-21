@@ -3,8 +3,8 @@
 ## The goals of this R script are:
 ## To check whether pigmentation-related genes are overrepresented among outlier genes.
 
-## Packages:
-library(tidyverse)
+## Packages (base R is sufficient):
+# library(tidyverse)
 
 ## Working directory:
 setwd("~/Dropbox/Science/MYPAPERS_ongoing/Podarcis_parallelisms/")
@@ -16,7 +16,8 @@ names(ann) <- c("CHROM", "START", "END", "gene", "ID")
 ## Restrict the universe to genes with valid gene symbols:
 ## This step avoids a mismatch in the universe used for the Fisher’s exact test.
 ## Otherwise, we might inflate the background and bias enrichment tests or distort odds ratios.
-ann_sym <- ann[!is.na(ann$gene) & ann$gene != "", ]
+## We also exclude uncharacterized NCBI loci (prefixed with 'LOC') to align with the named pigmentation database:
+ann_sym <- ann[!is.na(ann$gene) & ann$gene != "" & !grepl("^LOC", ann$gene), ]
 n_total_genes <- length(unique(ann_sym$gene))
 n_total_genes
 
@@ -50,8 +51,8 @@ cutoff <- 0.9925
   taxa <- sort(c("filfolensis", "pityusensis", "vaucheri", "liolepis", "cretensis", "gaigeae"))
   for (sp in taxa) {
   
-    ## Outlier genes for species:
-    out_sp <- out_genes$gene[out_genes[[sp]] == 1 & !is.na(out_genes$gene)]
+    ## Outlier genes for species with valid gene symbols (excluding uncharacterized LOC loci to match universe):
+    out_sp <- out_genes$gene[out_genes[[sp]] == 1 & !is.na(out_genes$gene) & !grepl("^LOC", out_genes$gene)]
     out_sp <- unique(out_sp)
 
     ## For contingency table, we'll need the total number of outlier genes for species:
@@ -103,7 +104,11 @@ cutoff <- 0.9925
 #} ## Close loop (cutoff).
 
 ## Combine into single dataframe:
-res_eft_df <- bind_rows(res_eft)
+if (requireNamespace("dplyr", quietly = TRUE)) {
+  res_eft_df <- dplyr::bind_rows(res_eft)
+} else {
+  res_eft_df <- do.call(rbind, res_eft)
+}
 
 ## Multiple testing correction:
 res_eft_df$padj <- p.adjust(res_eft_df$p_value, method = "BH")
@@ -111,8 +116,8 @@ res_eft_df$padj <- p.adjust(res_eft_df$p_value, method = "BH")
 ## Percentage of outliers corresponding to color genes:
 res_eft_df$color_gene_prop <- res_eft_df$n_color_outlier / res_eft_df$n_outlier
 
-## View:
-View(res_eft_df)
+## Print summary:
+print(res_eft_df)
 
 ## Save to file:
 write.csv(res_eft_df, "color_genes/Fishers_exact_color_enrichment.csv", row.names = FALSE)

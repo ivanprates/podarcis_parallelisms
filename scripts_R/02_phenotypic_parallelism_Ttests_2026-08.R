@@ -382,6 +382,7 @@ mean(summary_theta_lower$angle_deg) ## Extract mean angle.
 sd(summary_theta_lower$angle_deg)   ## And its std.
 
 ## Save results into supplementary table:
-write.csv(summary_theta_full, file = "drafts/Table_S2_parallelism_analyses.csv", row.names = FALSE)
+out_table_s2 <- if (dir.exists("drafts/3_second_version")) "drafts/3_second_version/Table_S2_parallelism_analyses.csv" else "drafts/Table_S2_parallelism_analyses.csv"
+write.csv(summary_theta, file = out_table_s2, row.names = FALSE)
 
 ## End of script.

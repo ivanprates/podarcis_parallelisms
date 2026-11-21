@@ -25,9 +25,9 @@ get_species_genes <- function(df, sp_col) {
   unique(as.character(df$ID)[df[[sp_col]] == 1])
 }
 
-## Define function: simulated overlapping gene sets:
-simulate_overlap <- function(n_outliers, all_genes) {
-  sampled_genes <- lapply(n_outliers, function(n) sample(all_genes, n))
+## Define function: simulated overlapping gene sets (accounting for gene target size):
+simulate_overlap <- function(n_outliers, all_genes, weights) {
+  sampled_genes <- lapply(n_outliers, function(n) sample(all_genes, size = n, replace = FALSE, prob = weights))
   sim_overlap <- Reduce(intersect, sampled_genes)
   length(sim_overlap)
 }
@@ -68,8 +68,11 @@ sum(NCC$NCC_gene)
 ## NCC genes in outliers:
 NCC$gene[NCC$gene %in% genes$gene]
 
-## Limit gene set to all muralis genes:
-genes <- genes[genes$muralis == 1, ]
+## Limit gene set to muralis genes:
+#genes <- genes[genes$muralis == 1, ]
+
+## Alternatively, limit gene set to NCC genes:
+#genes <- genes[genes$gene %in% NCC$gene, ]
 
 ## Check for species:
 sum(genes$cretensis)
@@ -79,15 +82,14 @@ sum(genes$liolepis)
 sum(genes$pityusensis)
 sum(genes$vaucheri)
 
-## Alternatively, limit gene set to NCC genes:
-#genes <- genes[genes$gene %in% NCC$gene, ]
+## All P. muralis genes and length weights:
+Pmu_bed <- read.table(file = "baypass/annotations/GCF_004329235.1_PodMur_1.0_genomic_patched_candidate_region_genes.bed", header = FALSE)
+names(Pmu_bed) <- c("CHROM", "start", "end", "gene", "ID")
 
-## All P. muralis genes:
-Pmu_genes <- read.table(file = "baypass/annotations/GCF_004329235.1_PodMur_1.0_genomic_patched_candidate_region_genes.bed", header = FALSE)
-names(Pmu_genes) <- c("CHROM", "start", "end", "gene", "ID")
-
-## Keep only gene IDs:
-Pmu_genes <- Pmu_genes$ID
+## Effective gene length (+20 kb to account for 10 kb flanking buffers on each side):
+Pmu_bed$eff_length <- (Pmu_bed$end - Pmu_bed$start) + 20000
+Pmu_weights <- Pmu_bed$eff_length / sum(Pmu_bed$eff_length)
+Pmu_genes <- Pmu_bed$ID
 
 ## Dataframe to store results:
 sim_df <- data.frame()
@@ -132,7 +134,7 @@ for (k in 2:length(species)) {
     ## Simulations:
     set.seed(123)
     n_sim <- 10000
-    sim_overlaps <- replicate(n = n_sim, expr = simulate_overlap(n_outliers = n_outliers, all_genes = Pmu_genes))
+    sim_overlaps <- replicate(n = n_sim, expr = simulate_overlap(n_outliers = n_outliers, all_genes = Pmu_genes, weights = Pmu_weights))
     
     ## One-sided p-value (excess overlaps):
     p_value <- mean(x = sim_overlaps >= n_emp)
@@ -168,7 +170,7 @@ for (k in 2:length(species)) {
 } ## Close loop (k).
 
 ## Write results to file:
-#write.csv(sim_df, paste0("outlier_sharing_simulations/data/sims_", cutoff, ".csv"), row.names = FALSE)
+write.csv(sim_df, paste0("outlier_sharing_simulations/data/sims_", cutoff, ".csv"), row.names = FALSE)
 
 ## Limit to comparisons with muralis:
 mur_df <- sim_df[sim_df$No_species_in_set == 2, ]
